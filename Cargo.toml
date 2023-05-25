@@ -1,0 +1,16 @@
+[package]
+name = "ipcisolated"
+authors = ["sisungo <sisungo@icloud.com>"]
+version = "0.1.0"
+edition = "2021"
+license = "Unlicense"
+publish = false
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["net", "io-util", "macros", "rt", "rt-multi-thread", "fs", "signal"] }
