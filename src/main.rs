@@ -20,44 +20,72 @@ struct Cmdline {
 }
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
+async fn main() {
+    // Initializes the logging system
+    tracing_subscriber::fmt::init();
+
+    // Parses command-line parameters
     let cmdline = Cmdline::parse();
 
+    // Reads service files
     let mut services = Vec::with_capacity(cmdline.services.len());
     for i in cmdline.services {
-        let blob = tokio::fs::read_to_string(i).await?;
-        let service: config::Service = serde_json::from_str(&blob)?;
+        let service = match config::Service::from_path(&i).await {
+            Ok(x) => x,
+            Err(err) => {
+                tracing::error!(
+                    "failed to read service at `{}`: {}",
+                    i.to_string_lossy(),
+                    err
+                );
+                std::process::exit(1);
+            }
+        };
         services.push(service);
     }
 
-    for service in services.iter() {
+    // Starts services
+    for (count, service) in services.iter().enumerate() {
         match redirector::Node::from_config(service, &cmdline.defines) {
-            Ok(node) => {tokio::spawn(async move {
-                loop {
-                    if let Ok(pair) = node.accept().await {
-                        pair.run();
+            Ok(node) => {
+                tokio::spawn(async move {
+                    loop {
+                        match node.accept().await {
+                            Ok(pair) => pair.run(),
+                            Err(err) => {
+                                tracing::warn!("service(id={}): accept() failed: {}", count, err);
+                            },
+                        }
                     }
-                }
-            });},
+                });
+            }
             Err(err) => match cmdline.strict {
                 true => {
+                    tracing::error!("service(id={}) failed to start: {}", count, err);
                     clean(&services, &cmdline.defines).await;
-                    Err(err)?
+                    std::process::exit(3);
+                }
+                false => {
+                    tracing::warn!("service(id={}) failed to start: {}", count, err);
+                    continue;
                 },
-                false => continue,
             },
         }
     }
 
-    tokio::signal::ctrl_c().await?;
+    if let Err(err) = tokio::signal::ctrl_c().await {
+        tracing::error!("failed listening Ctrl-C signal: {}", err);
+    }
     clean(&services, &cmdline.defines).await;
-
-    Ok(())
 }
 
+/// Removes files to prepare for exiting
 async fn clean(services: &[Service], defines: &[(String, String)]) {
+    tracing::trace!("cleaning up...");
     for service in services {
-        tokio::fs::remove_file(service.isolated_path(defines)).await.ok();
+        if let Err(err) = tokio::fs::remove_file(service.isolated_path(defines)).await {
+            tracing::warn!("a service failed to cleanup: {}", err);
+        }
     }
 }
 

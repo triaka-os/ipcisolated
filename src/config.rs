@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Service {
@@ -12,6 +12,11 @@ impl Service {
     }
     pub fn isolated_path(&self, defines: &[(String, String)]) -> PathBuf {
         process_defines(&self.isolated_path, defines)
+    }
+    pub async fn from_path<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
+        let blob = tokio::fs::read_to_string(path).await?;
+        let service: Self = serde_json::from_str(&blob)?;
+        Ok(service)
     }
 }
 
