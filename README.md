@@ -1,2 +1,5 @@
-# ipcisolated
-ipcisolated is a tool to redirect Unix Domain Sockets.
+# udsrproxy
+`udsrproxy` is a reverse proxy for Unix Domain Sockets.
+
+## Usage
+

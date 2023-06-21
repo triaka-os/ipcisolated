@@ -1,22 +1,24 @@
 pub mod config;
-mod redirector;
+mod proxy;
 
 use clap::Parser;
-use config::Service;
-use std::{error::Error, path::PathBuf};
+use config::{Config, Service};
+use std::error::Error;
 
 #[derive(Debug, Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cmdline {
+    /// Define <key> to <value>
     #[arg(short = 'D', value_parser = parse_key_val::<String, String>)]
     defines: Vec<(String, String)>,
 
-    #[arg(long = "service")]
-    services: Vec<PathBuf>,
+    /// Filesystem path of the configuration, or `-` for reading from stdin
+    #[arg(short, long)]
+    config: String,
 
-    /// Make `ipcisolated` fail if some services fails to start
-    #[arg(long)]
-    strict: bool,
+    /// Don't cleanup on exit
+    #[arg(long, default_value_t)]
+    no_cleanup: bool,
 }
 
 #[tokio::main]
@@ -27,26 +29,17 @@ async fn main() {
     // Parses command-line parameters
     let cmdline = Cmdline::parse();
 
-    // Reads service files
-    let mut services = Vec::with_capacity(cmdline.services.len());
-    for i in cmdline.services {
-        let service = match config::Service::from_path(&i).await {
-            Ok(x) => x,
-            Err(err) => {
-                tracing::error!(
-                    "failed to read service at `{}`: {}",
-                    i.to_string_lossy(),
-                    err
-                );
-                std::process::exit(1);
-            }
-        };
-        services.push(service);
-    }
+    // Reads the configuration
+    let config = Config::read_from(&cmdline.config)
+        .await
+        .unwrap_or_else(|err| {
+            tracing::error!("failed to read the configuration: {}", err);
+            std::process::exit(1);
+        });
 
     // Starts services
-    for (count, service) in services.iter().enumerate() {
-        match redirector::Node::from_config(service, &cmdline.defines) {
+    for (count, service) in config.services.iter().enumerate() {
+        match proxy::Node::from_config(service, &cmdline.defines) {
             Ok(node) => {
                 tokio::spawn(async move {
                     loop {
@@ -54,22 +47,16 @@ async fn main() {
                             Ok(pair) => pair.run(),
                             Err(err) => {
                                 tracing::warn!("service(id={}): accept() failed: {}", count, err);
-                            },
+                            }
                         }
                     }
                 });
             }
-            Err(err) => match cmdline.strict {
-                true => {
-                    tracing::error!("service(id={}) failed to start: {}", count, err);
-                    clean(&services, &cmdline.defines).await;
-                    std::process::exit(3);
-                }
-                false => {
-                    tracing::warn!("service(id={}) failed to start: {}", count, err);
-                    continue;
-                },
-            },
+            Err(err) => {
+                tracing::error!("service(id={}) failed to start: {}", count, err);
+                clean(&cmdline, &config.services, &cmdline.defines).await;
+                std::process::exit(3);
+            }
         }
     }
 
@@ -77,15 +64,17 @@ async fn main() {
     if let Err(err) = tokio::signal::ctrl_c().await {
         tracing::error!("failed listening Ctrl-C signal: {}", err);
     }
-    clean(&services, &cmdline.defines).await;
+    clean(&cmdline, &config.services, &cmdline.defines).await;
 }
 
 /// Removes files to prepare for exiting
-async fn clean(services: &[Service], defines: &[(String, String)]) {
-    tracing::trace!("cleaning up...");
-    for service in services {
-        if let Err(err) = tokio::fs::remove_file(service.isolated_path(defines)).await {
-            tracing::warn!("a service failed to cleanup: {}", err);
+async fn clean(cmdline: &Cmdline, services: &[Service], defines: &[(String, String)]) {
+    if !cmdline.no_cleanup {
+        tracing::trace!("cleaning up...");
+        for service in services {
+            if let Err(err) = tokio::fs::remove_file(service.dst_in(defines)).await {
+                tracing::warn!("a service failed to cleanup: {}", err);
+            }
         }
     }
 }
