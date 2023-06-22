@@ -30,12 +30,10 @@ async fn main() {
     let cmdline = Cmdline::parse();
 
     // Reads the configuration
-    let config = Config::read_from(&cmdline.config)
-        .await
-        .unwrap_or_else(|err| {
-            tracing::error!("failed to read the configuration: {}", err);
-            std::process::exit(1);
-        });
+    let config = Config::read_from(&cmdline.config).unwrap_or_else(|err| {
+        tracing::error!("failed to read the configuration: {}", err);
+        std::process::exit(1);
+    });
 
     // Starts services
     for (count, service) in config.services.iter().enumerate() {

@@ -1,14 +1,17 @@
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Config {
     pub services: Vec<Service>,
 }
 impl Config {
-    pub async fn read_from<P: AsRef<Path>>(path: P) -> anyhow::Result<Self> {
-        let blob = tokio::fs::read_to_string(path).await?;
-        let service: Self = serde_json::from_str(&blob)?;
+    pub fn read_from(path: &str) -> anyhow::Result<Self> {
+        let rdr: Box<dyn std::io::Read> = match path {
+            "-" => Box::new(std::io::stdin()),
+            x => Box::new(std::fs::File::open(x)?),
+        };
+        let service: Self = serde_json::from_reader(rdr)?;
         Ok(service)
     }
 }

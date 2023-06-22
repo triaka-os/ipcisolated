@@ -5,22 +5,22 @@ use tokio::net::{UnixListener, UnixStream};
 /// An isolation node.
 #[derive(Debug)]
 pub struct Node {
-    raw_path: PathBuf,
-    isolated: UnixListener,
+    src: PathBuf,
+    dst: UnixListener,
 }
 impl Node {
     /// Creates a new `Node` from configuration.
     pub fn from_config(service: &Service, defines: &[(String, String)]) -> std::io::Result<Self> {
         Ok(Self {
-            raw_path: service.src_in(defines),
-            isolated: UnixListener::bind(service.dst_in(defines))?,
+            src: service.src_in(defines),
+            dst: UnixListener::bind(service.dst_in(defines))?,
         })
     }
 
     /// Accepts an connection, returning a [Pair].
     pub async fn accept(&self) -> std::io::Result<Pair> {
-        let client = self.isolated.accept().await?.0;
-        let server = UnixStream::connect(&self.raw_path).await?;
+        let client = self.dst.accept().await?.0;
+        let server = UnixStream::connect(&self.src).await?;
         Ok(Pair { client, server })
     }
 }
